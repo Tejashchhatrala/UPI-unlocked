@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import '../../../../models/catalog_models.dart';
-import '../../../../services/storage_service.dart';
-import '../../setup/dialogs/add_category_dialog.dart';
-import '../../setup/dialogs/add_product_dialog.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 class CatalogManager extends StatefulWidget {
   const CatalogManager({super.key});
@@ -13,270 +13,336 @@ class CatalogManager extends StatefulWidget {
 }
 
 class _CatalogManagerState extends State<CatalogManager> {
-  final StorageService _storageService = StorageService();
-  List<Category> _categories = [];
-  bool _isLoading = true;
+  final List<String> _viewOptions = ['Grid', 'List'];
+  String _currentView = 'Grid';
+  String _selectedCategory = 'All';
+  bool _isLoading = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadCatalog();
-  }
-
-  Future<void> _loadCatalog() async {
-    try {
-      final catalog = await _storageService.getCatalog(
-        FirebaseAuth.instance.currentUser!.uid,
-      );
-      setState(() {
-        _categories = catalog ?? [];
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading catalog: $e')),
-        );
-      }
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _addCategory() async {
-    final result = await showDialog<Category>(
+  Future<void> _addNewItem() async {
+    await showDialog(
       context: context,
-      builder: (context) => const AddCategoryDialog(),
+      builder: (context) => const AddEditItemDialog(),
     );
-
-    if (result != null) {
-      setState(() {
-        _categories.add(result);
-      });
-      await _saveCatalog();
-    }
   }
 
-  Future<void> _addProduct(Category category) async {
-    final result = await showDialog<Product>(
+  Future<void> _addNewCategory() async {
+    await showDialog(
       context: context,
-      builder: (context) => const AddProductDialog(),
+      builder: (context) => const AddEditCategoryDialog(),
     );
-
-    if (result != null) {
-      setState(() {
-        category.products.add(result);
-      });
-      await _saveCatalog();
-    }
-  }
-
-  Future<void> _saveCatalog() async {
-    try {
-      await _storageService.saveCatalog(
-        FirebaseAuth.instance.currentUser!.uid,
-        _categories,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving catalog: $e')),
-        );
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     return Column(
       children: [
+        // Top toolbar
         Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: ElevatedButton.icon(
-            onPressed: _addCategory,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Category'),
-          ),
-        ),
-        Expanded(
-          child: _categories.isEmpty
-              ? const Center(
-                  child: Text('No categories yet. Add your first category!'),
-                )
-              : ListView.builder(
-                  itemCount: _categories.length,
-                  itemBuilder: (context, index) {
-                    final category = _categories[index];
-                    return CategoryTile(
-                      category: category,
-                      onAddProduct: () => _addProduct(category),
-                      onEditCategory: () async {
-                        final result = await showDialog<Category>(
-                          context: context,
-                          builder: (context) => AddCategoryDialog(
-                            initialCategory: category,
-                          ),
-                        );
-                        if (result != null) {
-                          setState(() {
-                            _categories[index] = result;
-                          });
-                          await _saveCatalog();
-                        }
-                      },
-                      onDeleteCategory: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (context) => AlertDialog(
-                            title: const Text('Delete Category'),
-                            content: Text(
-                              'Are you sure you want to delete "${category.name}"?',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('Cancel'),
-                              ),
-                              ElevatedButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                        );
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              // Category dropdown
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('vendors')
+                      .doc(FirebaseAuth.instance.currentUser!.uid)
+                      .collection('categories')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return const Text('Error loading categories');
+                    }
 
-                        if (confirm == true) {
-                          setState(() {
-                            _categories.removeAt(index);
-                          });
-                          await _saveCatalog();
-                        }
+                    List<String> categories = ['All'];
+                    if (snapshot.hasData) {
+                      categories.addAll(
+                        snapshot.data!.docs.map((doc) => doc['name'] as String),
+                      );
+                    }
+
+                    return DropdownButton<String>(
+                      value: _selectedCategory,
+                      isExpanded: true,
+                      items: categories.map((category) {
+                        return DropdownMenuItem(
+                          value: category,
+                          child: Text(category),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() => _selectedCategory = value!);
                       },
                     );
                   },
                 ),
+              ),
+              const SizedBox(width: 16),
+              // View toggle
+              SegmentedButton<String>(
+                segments: _viewOptions.map((view) {
+                  return ButtonSegment<String>(
+                    value: view,
+                    icon: Icon(
+                      view == 'Grid' ? Icons.grid_view : Icons.list,
+                    ),
+                  );
+                }).toList(),
+                selected: {_currentView},
+                onSelectionChanged: (Set<String> newSelection) {
+                  setState(() => _currentView = newSelection.first);
+                },
+              ),
+            ],
+          ),
+        ),
+
+        // Action buttons
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _addNewItem,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Item'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _addNewCategory,
+                  icon: const Icon(Icons.category),
+                  label: const Text('Add Category'),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Catalog items
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: _getCatalogStream(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text('Error: ${snapshot.error}'),
+                );
+              }
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+
+              final items = snapshot.data?.docs ?? [];
+
+              if (items.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.inventory_2_outlined,
+                        size: 64,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'No items in catalog',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ElevatedButton(
+                        onPressed: _addNewItem,
+                        child: const Text('Add First Item'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return _currentView == 'Grid'
+                  ? GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        childAspectRatio: 0.75,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                      ),
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        return ItemCard(
+                          item: items[index].data() as Map<String, dynamic>,
+                          itemId: items[index].id,
+                        );
+                      },
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        return ItemListTile(
+                          item: items[index].data() as Map<String, dynamic>,
+                          itemId: items[index].id,
+                        );
+                      },
+                    );
+            },
+          ),
         ),
       ],
     );
   }
+
+  Stream<QuerySnapshot> _getCatalogStream() {
+    final userId = FirebaseAuth.instance.currentUser!.uid;
+    final baseQuery = FirebaseFirestore.instance
+        .collection('vendors')
+        .doc(userId)
+        .collection('items');
+
+    if (_selectedCategory == 'All') {
+      return baseQuery.orderBy('name').snapshots();
+    }
+
+    return baseQuery
+        .where('category', isEqualTo: _selectedCategory)
+        .orderBy('name')
+        .snapshots();
+  }
 }
 
-class CategoryTile extends StatelessWidget {
-  final Category category;
-  final VoidCallback onAddProduct;
-  final VoidCallback onEditCategory;
-  final VoidCallback onDeleteCategory;
+class ItemCard extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final String itemId;
 
-  const CategoryTile({
+  const ItemCard({
     super.key,
-    required this.category,
-    required this.onAddProduct,
-    required this.onEditCategory,
-    required this.onDeleteCategory,
+    required this.item,
+    required this.itemId,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: ExpansionTile(
-        title: Text(category.name),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _editItem(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: onEditCategory,
+            // Item image
+            AspectRatio(
+              aspectRatio: 1,
+              child: item['imageUrl'] != null
+                  ? Image.network(
+                      item['imageUrl'],
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(Icons.image_not_supported, size: 50),
+                    )
+                  : Container(
+                      color: Colors.grey[200],
+                      child: const Icon(Icons.image_not_supported, size: 50),
+                    ),
             ),
-            IconButton(
-              icon: const Icon(Icons.delete),
-              onPressed: onDeleteCategory,
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item['name'],
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '₹${item['price']}',
+                    style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        item['category'],
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                        ),
+                      ),
+                      Switch(
+                        value: item['isAvailable'] ?? true,
+                        onChanged: (value) => _updateAvailability(value),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
-        children: [
-          ...category.products.map((product) => ProductTile(
-                product: product,
-                onEdit: () async {
-                  final result = await showDialog<Product>(
-                    context: context,
-                    builder: (context) => AddProductDialog(
-                      initialProduct: product,
-                    ),
-                  );
-                  if (result != null) {
-                    // Update product
-                    final index = category.products.indexOf(product);
-                    category.products[index] = result;
-                  }
-                },
-                onDelete: () async {
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Delete Product'),
-                      content: Text(
-                        'Are you sure you want to delete "${product.name}"?',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                          ),
-                          child: const Text('Delete'),
-                        ),
-                      ],
-                    ),
-                  );
-
-                  if (confirm == true) {
-                    category.products.remove(product);
-                  }
-                },
-              )),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: ElevatedButton.icon(
-              onPressed: onAddProduct,
-              icon: const Icon(Icons.add),
-              label: const Text('Add Product'),
-            ),
-          ),
-        ],
       ),
     );
   }
+
+  Future<void> _editItem(BuildContext context) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AddEditItemDialog(
+        initialItem: item,
+        itemId: itemId,
+      ),
+    );
+  }
+
+  Future<void> _updateAvailability(bool value) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('vendors')
+          .doc(FirebaseAuth.instance.currentUser!.uid)
+          .collection('items')
+          .doc(itemId)
+          .update({'isAvailable': value});
+    } catch (e) {
+      print('Error updating availability: $e');
+    }
+  }
 }
 
-class ProductTile extends StatelessWidget {
-  final Product product;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
+class ItemListTile extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final String itemId;
 
-  const ProductTile({
+  const ItemListTile({
     super.key,
-    required this.product,
-    required this.onEdit,
-    required this.onDelete,
+    required this.item,
+    required this.itemId,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: product.imageUrl != null
+      leading: item['imageUrl'] != null
           ? Image.network(
-              product.imageUrl!,
+              item['imageUrl'],
               width: 50,
               height: 50,
               fit: BoxFit.cover,
@@ -284,27 +350,36 @@ class ProductTile extends StatelessWidget {
                   const Icon(Icons.image_not_supported),
             )
           : const Icon(Icons.image_not_supported),
-      title: Text(product.name),
-      subtitle: Text('₹${product.price}'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Switch(
-            value: product.isAvailable,
-            onChanged: (value) {
-              product.isAvailable = value;
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.edit),
-            onPressed: onEdit,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: onDelete,
-          ),
-        ],
+      title: Text(item['name']),
+      subtitle: Text('₹${item['price']} • ${item['category']}'),
+      trailing: Switch(
+        value: item['isAvailable'] ?? true,
+        onChanged: (value) => _updateAvailability(value),
+      ),
+      onTap: () => _editItem(context),
+    );
+  }
+
+  Future<void> _editItem(BuildContext context) async {
+    await showDialog(
+      context: context,
+      builder: (context) => AddEditItemDialog(
+        initialItem: item,
+        itemId: itemId,
       ),
     );
+  }
+
+  Future<void> _updateAvailability(bool value) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('vendors')
+          .doc(FirebaseAuth.instance.currentUser!.uid)
+          .collection('items')
+          .doc(itemId)
+          .update({'isAvailable': value});
+    } catch (e) {
+      print('Error updating availability: $e');
+    }
   }
 }
