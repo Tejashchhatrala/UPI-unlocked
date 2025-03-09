@@ -1,0 +1,73 @@
+class Category {
+  String id;
+  String name;
+  List<Product> products;
+
+  Category({
+    required this.id,
+    required this.name,
+    List<Product>? products,
+  }) : products = products ?? [];
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'products': products.map((product) => product.toMap()).toList(),
+    };
+  }
+
+  factory Category.fromMap(Map<String, dynamic> map) {
+    return Category(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      products: (map['products'] as List?)
+          ?.map((product) => Product.fromMap(product))
+          .toList() ?? [],
+    );
+  }
+}
+
+class Product {
+  String id;
+  String name;
+  double price;
+  String? imageUrl;
+  String? localImagePath; // For offline storage
+  bool isAvailable;
+  int? stockCount;
+
+  Product({
+    required this.id,
+    required this.name,
+    required this.price,
+    this.imageUrl,
+    this.localImagePath,
+    this.isAvailable = true,
+    this.stockCount,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'price': price,
+      'imageUrl': imageUrl,
+      'localImagePath': localImagePath,
+      'isAvailable': isAvailable,
+      'stockCount': stockCount,
+    };
+  }
+
+  factory Product.fromMap(Map<String, dynamic> map) {
+    return Product(
+      id: map['id'] ?? '',
+      name: map['name'] ?? '',
+      price: (map['price'] ?? 0).toDouble(),
+      imageUrl: map['imageUrl'],
+      localImagePath: map['localImagePath'],
+      isAvailable: map['isAvailable'] ?? true,
+      stockCount: map['stockCount'],
+    );
+  }
+}
