@@ -37,3 +37,10 @@ YAML
 
 dependencies:
   intl: ^0.18.1
+
+  the url_launcher dependency to your pubspec.yaml:
+
+YAML
+
+dependencies:
+  url_launcher: ^6.1.14
