@@ -29,3 +29,11 @@ YAML
 
 dependencies:
   fl_chart: ^0.63.0
+
+
+  add the intl package to your pubspec.yaml:
+
+YAML
+
+dependencies:
+  intl: ^0.18.1

@@ -5,6 +5,7 @@ import 'widgets/catalog_manager.dart';
 import 'widgets/analytics_summary.dart';
 import 'widgets/ratings_tab.dart';
 import '../../../services/sync_service.dart';
+import '../settings/vendor_profile_settings.dart'; // Add this import
 
 class VendorDashboard extends StatefulWidget {
   const VendorDashboard({super.key});
@@ -74,23 +75,49 @@ class _VendorDashboardState extends State<VendorDashboard> {
             ),
             // Profile/Settings menu
             PopupMenuButton(
+              onSelected: (value) {
+                if (value == 'profile') {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const VendorProfileSettings(),
+                    ),
+                  );
+                } else if (value == 'logout') {
+                  FirebaseAuth.instance.signOut();
+                }
+              },
               itemBuilder: (context) => [
-                PopupMenuItem(
-                  child: const Text('Profile Settings'),
-                  onTap: () {
-                    // TODO: Navigate to profile settings
-                  },
+                const PopupMenuItem(
+                  value: 'profile',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings),
+                      SizedBox(width: 8),
+                      Text('Profile Settings'),
+                    ],
+                  ),
                 ),
-                PopupMenuItem(
-                  child: const Text('Business Hours'),
-                  onTap: () {
-                    // TODO: Navigate to business hours settings
-                  },
+                const PopupMenuItem(
+                  value: 'businessHours',
+                  child: Row(
+                    children: [
+                      Icon(Icons.access_time),
+                      SizedBox(width: 8),
+                      Text('Business Hours'),
+                    ],
+                  ),
                 ),
                 const PopupMenuDivider(),
-                PopupMenuItem(
-                  child: const Text('Logout'),
-                  onTap: () => FirebaseAuth.instance.signOut(),
+                const PopupMenuItem(
+                  value: 'logout',
+                  child: Row(
+                    children: [
+                      Icon(Icons.logout),
+                      SizedBox(width: 8),
+                      Text('Logout'),
+                    ],
+                  ),
                 ),
               ],
             ),
